@@ -62,49 +62,33 @@ def safe_col(df, col):
         df[col] = 0
     return df
 
+# Orders columns
 orders = safe_col(orders, "Количество")
 orders = safe_col(orders, "Сумма")
 orders = safe_col(orders, "Контрагент")
 orders = safe_col(orders, "Номенклатура")
 orders = safe_col(orders, "Период")
 
+# Sales columns
 sales = safe_col(sales, "Количество")
-sales = safe_col(sales, "Продажная сумма")
+sales = safe_col(sales, "Продажная сумма")  # ✅ TO‘G‘RI nom
 sales = safe_col(sales, "Возврат сумма")
 sales = safe_col(sales, "Номенклатура")
 sales = safe_col(sales, "Контрагент")
 sales = safe_col(sales, "Период")
 
+# Convert to datetime
 orders["Период"] = pd.to_datetime(orders["Период"], errors="coerce")
 sales["Период"]  = pd.to_datetime(sales["Период"], errors="coerce")
 
 # ================================
-# DATE + TIME FILTER
+# FIXED DATE FILTER: 01.12.2025 - 30.12.2025
 # ================================
-min_date = min(orders["Период"].min(), sales["Период"].min())
-max_date = max(orders["Период"].max(), sales["Период"].max())
+date_from = pd.to_datetime("2025-12-01")
+date_to   = pd.to_datetime("2025-12-30")
 
-date_from, date_to = st.date_input(
-    "📅 Sana oralig‘i",
-    [min_date.date(), max_date.date()]
-)
-
-time_from = st.time_input("⏰ Boshlanish vaqti", value=pd.to_datetime("00:00").time())
-time_to   = st.time_input("⏰ Tugash vaqti", value=pd.to_datetime("23:59").time())
-
-orders = orders[
-    (orders["Период"] >= pd.to_datetime(date_from)) &
-    (orders["Период"] <= pd.to_datetime(date_to)) &
-    (orders["Период"].dt.time >= time_from) &
-    (orders["Период"].dt.time <= time_to)
-]
-
-sales = sales[
-    (sales["Период"] >= pd.to_datetime(date_from)) &
-    (sales["Период"] <= pd.to_datetime(date_to)) &
-    (sales["Период"].dt.time >= time_from) &
-    (sales["Период"].dt.time <= time_to)
-]
+orders = orders[(orders["Период"] >= date_from) & (orders["Период"] <= date_to)]
+sales  = sales[(sales["Период"] >= date_from) & (sales["Период"] <= date_to)]
 
 # ================================
 # KPI BLOCK
@@ -121,7 +105,7 @@ c2.metric("💰 Sotuv summasi", f"{total_sales:,.0f}")
 c3.metric("↩️ Qaytgan summa", f"{total_return:,.0f}")
 c4.metric(
     "❌ Qaytish %",
-    f"{min((total_return / max(total_sales, 1) * 100), 100):.2f}%"
+    f"{min((total_return / max(total_sales,1)*100), 100):.2f}%"
 )
 
 # ================================
@@ -130,50 +114,67 @@ c4.metric(
 st.subheader("🛒 Mahsulot bo‘yicha analiz")
 
 prod_orders = orders.groupby("Номенклатура")["Количество"].sum()
-prod_sales  = sales.groupby("Номенклатура")["Продажная summa"].sum()
+prod_sales  = sales.groupby("Номенклатура")["Продажная сумма"].sum()  # ✅ TO‘G‘RI
 prod_return = sales.groupby("Номенклатура")["Возврат сумма"].sum()
 
 summary = pd.concat([prod_orders, prod_sales, prod_return], axis=1).fillna(0)
 summary.columns = ["Zakaz", "Sotuv", "Qaytish"]
 
-summary["Return_%"] = (
-    summary["Qaytish"] / summary["Sotuv"].replace(0, 1) * 100
-).clip(upper=100).round(2)
+summary["Return_%"] = (summary["Qaytish"] / summary["Sotuv"].replace(0,1) * 100).clip(upper=100).round(2)
 
 st.dataframe(summary.sort_values("Return_%", ascending=False), use_container_width=True)
+
+# ================================
+# ZARARLI MAHSULOTLAR
+# ================================
+st.subheader("🚨 Zarar keltirayotgan mahsulotlar")
+loss_products = summary[(summary["Return_%"] > 20) & (summary["Qaytish"] > 0)]
+st.dataframe(loss_products, use_container_width=True)
 
 # ================================
 # CLIENT ANALYSIS
 # ================================
 st.subheader("👤 Klientlar kesimida analiz")
-
-client_orders = orders.groupby("Контрагент")["Количество"].sum()
+client_orders  = orders.groupby("Контрагент")["Количество"].sum()
 client_returns = sales.groupby("Контрагент")["Возврат сумма"].sum()
 
 client_df = pd.concat([client_orders, client_returns], axis=1).fillna(0)
 client_df.columns = ["Zakaz", "Qaytish"]
+client_df["Qaytish_%"] = (client_df["Qaytish"] / client_df["Zakaz"].replace(0,1) * 100).clip(upper=100).round(2)
 
-client_df["Qaytish_%"] = (
-    client_df["Qaytish"] / client_df["Zakaz"].replace(0, 1) * 100
-).clip(upper=100).round(2)
+st.dataframe(client_df.sort_values("Qaytish_%", ascending=False), use_container_width=True)
 
-st.dataframe(
-    client_df.sort_values("Qaytish_%", ascending=False),
-    use_container_width=True
-)
+# ================================
+# WEEKDAY ANALYSIS
+# ================================
+st.subheader("📆 Hafta kunlari bo‘yicha zakaz & qaytish")
+orders["weekday"] = orders["Период"].dt.day_name()
+sales["weekday"]  = sales["Периod"].dt.day_name()
+
+week_order  = orders.groupby("weekday")["Количество"].sum()
+week_return = sales.groupby("weekday")["Возврат сумма"].sum()
+
+fig, ax = plt.subplots(figsize=(10,5))
+week_order.plot(kind="bar", ax=ax)
+ax.set_title("Zakazlar – hafta kunlari")
+st.pyplot(fig)
+
+fig2, ax2 = plt.subplots(figsize=(10,5))
+week_return.plot(kind="bar", ax=ax2)
+ax2.set_title("Qaytishlar – hafta kunlari")
+st.pyplot(fig2)
 
 # ================================
 # SIMPLE FORECAST
 # ================================
 st.subheader("📈 Zakaz prognozi (oddiy)")
-
-daily = orders.groupby(orders["Период"].dt.date)["Количество"].sum()
+daily = orders.groupby(orders["Периod"].dt.date)["Количество"].sum()
 forecast = daily.rolling(3).mean()
 
-fig, ax = plt.subplots(figsize=(10,5))
-daily.plot(ax=ax, label="Real")
-forecast.plot(ax=ax, label="Prognoz")
-ax.legend()
-st.pyplot(fig)
+fig3, ax3 = plt.subplots(figsize=(10,5))
+daily.plot(ax=ax3, label="Real")
+forecast.plot(ax=ax3, label="Prognoz")
+ax3.legend()
+st.pyplot(fig3)
 
 st.success("✅ Analiz to‘liq yakunlandi")
