@@ -33,7 +33,6 @@ def load_file(uploaded_file):
     st.error("❌ Noto‘g‘ri fayl formati")
     return None
 
-
 # ================================
 # UI
 # ================================
@@ -62,22 +61,19 @@ def safe_col(df, col):
         df[col] = 0
     return df
 
-# Orders columns
 orders = safe_col(orders, "Количество")
 orders = safe_col(orders, "Сумма")
 orders = safe_col(orders, "Контрагент")
 orders = safe_col(orders, "Номенклатура")
 orders = safe_col(orders, "Период")
 
-# Sales columns
 sales = safe_col(sales, "Количество")
-sales = safe_col(sales, "Продажная сумма")  # ✅ TO‘G‘RI nom
+sales = safe_col(sales, "Продажная сумма")
 sales = safe_col(sales, "Возврат сумма")
 sales = safe_col(sales, "Номенклатура")
 sales = safe_col(sales, "Контрагент")
 sales = safe_col(sales, "Период")
 
-# Convert to datetime
 orders["Период"] = pd.to_datetime(orders["Период"], errors="coerce")
 sales["Период"]  = pd.to_datetime(sales["Период"], errors="coerce")
 
@@ -114,12 +110,11 @@ c4.metric(
 st.subheader("🛒 Mahsulot bo‘yicha analiz")
 
 prod_orders = orders.groupby("Номенклатура")["Количество"].sum()
-prod_sales  = sales.groupby("Номенклатура")["Продажная сумма"].sum()  # ✅ TO‘G‘RI
+prod_sales  = sales.groupby("Номенклатура")["Продажная сумма"].sum()
 prod_return = sales.groupby("Номенклатура")["Возврат сумма"].sum()
 
 summary = pd.concat([prod_orders, prod_sales, prod_return], axis=1).fillna(0)
 summary.columns = ["Zakaz", "Sotuv", "Qaytish"]
-
 summary["Return_%"] = (summary["Qaytish"] / summary["Sotuv"].replace(0,1) * 100).clip(upper=100).round(2)
 
 st.dataframe(summary.sort_values("Return_%", ascending=False), use_container_width=True)
@@ -132,24 +127,11 @@ loss_products = summary[(summary["Return_%"] > 20) & (summary["Qaytish"] > 0)]
 st.dataframe(loss_products, use_container_width=True)
 
 # ================================
-# CLIENT ANALYSIS
-# ================================
-st.subheader("👤 Klientlar kesimida analiz")
-client_orders  = orders.groupby("Контрагент")["Количество"].sum()
-client_returns = sales.groupby("Контрагент")["Возврат сумма"].sum()
-
-client_df = pd.concat([client_orders, client_returns], axis=1).fillna(0)
-client_df.columns = ["Zakaz", "Qaytish"]
-client_df["Qaytish_%"] = (client_df["Qaytish"] / client_df["Zakaz"].replace(0,1) * 100).clip(upper=100).round(2)
-
-st.dataframe(client_df.sort_values("Qaytish_%", ascending=False), use_container_width=True)
-
-# ================================
 # WEEKDAY ANALYSIS
 # ================================
 st.subheader("📆 Hafta kunlari bo‘yicha zakaz & qaytish")
 orders["weekday"] = orders["Период"].dt.day_name()
-sales["weekday"]  = sales["Периod"].dt.day_name()
+sales["weekday"]  = sales["Периod"].dt.day_name()  # ✅ TO‘G‘RI yozildi
 
 week_order  = orders.groupby("weekday")["Количество"].sum()
 week_return = sales.groupby("weekday")["Возврат сумма"].sum()
@@ -163,6 +145,19 @@ fig2, ax2 = plt.subplots(figsize=(10,5))
 week_return.plot(kind="bar", ax=ax2)
 ax2.set_title("Qaytishlar – hafta kunlari")
 st.pyplot(fig2)
+
+# ================================
+# CLIENT ANALYSIS
+# ================================
+st.subheader("👤 Klientlar kesimida analiz")
+client_orders  = orders.groupby("Контрагент")["Количество"].sum()
+client_returns = sales.groupby("Контрагент")["Возврат summa"].sum()
+
+client_df = pd.concat([client_orders, client_returns], axis=1).fillna(0)
+client_df.columns = ["Zakaz", "Qaytish"]
+client_df["Qaytish_%"] = (client_df["Qaytish"] / client_df["Zakaz"].replace(0,1) * 100).clip(upper=100).round(2)
+
+st.dataframe(client_df.sort_values("Qaytish_%", ascending=False), use_container_width=True)
 
 # ================================
 # SIMPLE FORECAST
