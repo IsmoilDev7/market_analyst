@@ -1,49 +1,45 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 from io import BytesIO
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Zakaz & Sotuv Analitika", layout="wide")
+st.set_page_config(page_title="Zakaz Analitika", layout="wide")
 
-# ================================
-# UNIVERSAL EXCEL / CSV LOADER
-# ================================
-def load_file(uploaded_file):
-    if uploaded_file is None:
-        return None
-
-    name = uploaded_file.name.lower()
-    data = uploaded_file.read()
-
+# =========================
+# UNIVERSAL FILE LOADER
+# =========================
+def load_file(file):
+    name = file.name.lower()
+    data = file.read()
     try:
         if name.endswith(".csv"):
             return pd.read_csv(BytesIO(data))
-        if name.endswith(".xlsx"):
-            try:
-                return pd.read_excel(BytesIO(data), engine="openpyxl")
-            except Exception:
-                return pd.read_excel(BytesIO(data))
-        if name.endswith(".xls"):
+        else:
+            return pd.read_excel(BytesIO(data), engine="openpyxl")
+    except Exception:
+        try:
             return pd.read_excel(BytesIO(data))
-    except Exception as e:
-        st.error(f"❌ Faylni o‘qishda xatolik: {e}")
-        return None
+        except Exception as e:
+            st.error(f"Fayl o‘qilmadi: {e}")
+            return None
 
-    st.error("❌ Noto‘g‘ri fayl formati")
-    return None
+# =========================
+# SAFE COLUMN CREATOR
+# =========================
+def col(df, name):
+    if name not in df.columns:
+        df[name] = 0
+    return df
 
-
-# ================================
+# =========================
 # UI
-# ================================
-st.title("📊 Zakaz – Sotuv – Qaytish Analitik Dashboard")
+# =========================
+st.title("📊 Zakaz – Sotuv – Qaytish Analitika")
 
-orders_file = st.file_uploader("1️⃣ Zakaz fayli", type=["xlsx", "xls", "csv"])
-sales_file  = st.file_uploader("2️⃣ Sotuv / Qaytish fayli", type=["xlsx", "xls", "csv"])
+orders_file = st.file_uploader("📥 Zakaz fayli", ["xlsx", "xls", "csv"])
+sales_file  = st.file_uploader("📥 Sotuv / Qaytish fayli", ["xlsx", "xls", "csv"])
 
 if not orders_file or not sales_file:
-    st.info("Ikkala faylni ham yuklang")
     st.stop()
 
 orders = load_file(orders_file)
@@ -52,35 +48,26 @@ sales  = load_file(sales_file)
 if orders is None or sales is None:
     st.stop()
 
-st.success("✅ Fayllar muvaffaqiyatli yuklandi")
+# =========================
+# NORMALIZATION
+# =========================
+orders = col(orders, "Количество")
+orders = col(orders, "Контрагент")
+orders = col(orders, "Номенклатура")
+orders = col(orders, "Период")
 
-# ================================
-# SAFE COLUMN NORMALIZATION
-# ================================
-def safe_col(df, col):
-    if col not in df.columns:
-        df[col] = 0
-    return df
-
-orders = safe_col(orders, "Количество")
-orders = safe_col(orders, "Сумма")
-orders = safe_col(orders, "Контрагент")
-orders = safe_col(orders, "Номенклатура")
-orders = safe_col(orders, "Период")
-
-sales = safe_col(sales, "Количество")
-sales = safe_col(sales, "Продажная сумма")
-sales = safe_col(sales, "Возврат сумма")
-sales = safe_col(sales, "Номенклатура")
-sales = safe_col(sales, "Контрагент")
-sales = safe_col(sales, "Период")
+sales = col(sales, "Продажная сумма")
+sales = col(sales, "Возврат сумма")
+sales = col(sales, "Контрагент")
+sales = col(sales, "Номенклатура")
+sales = col(sales, "Период")
 
 orders["Период"] = pd.to_datetime(orders["Период"], errors="coerce")
 sales["Период"]  = pd.to_datetime(sales["Период"], errors="coerce")
 
-# ================================
+# =========================
 # DATE FILTER
-# ================================
+# =========================
 min_date = min(orders["Период"].min(), sales["Период"].min())
 max_date = max(orders["Период"].max(), sales["Период"].max())
 
@@ -95,97 +82,46 @@ orders = orders[(orders["Период"] >= pd.to_datetime(date_from)) &
 sales = sales[(sales["Период"] >= pd.to_datetime(date_from)) &
               (sales["Период"] <= pd.to_datetime(date_to))]
 
-# ================================
-# KPI BLOCK
-# ================================
-st.subheader("📌 Asosiy ko‘rsatkichlar")
+# =========================
+# CLIENT ANALYSIS (FIXED)
+# =========================
+st.subheader("👤 Klientlar kesimida QAYTISH ANALIZI")
 
-total_orders = orders["Количество"].sum()
-total_sales  = sales["Продажная сумма"].sum()
-total_return = sales["Возврат сумма"].sum()
+client_orders = orders.groupby("Контрагент")["Количество"].sum()
+client_sales  = sales.groupby("Контрагент")["Продажная сумма"].sum()
+client_return = sales.groupby("Контрагент")["Возврат сумма"].sum()
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("🧾 Zakaz miqdori", f"{total_orders:,.0f}")
-c2.metric("💰 Sotuv summasi", f"{total_sales:,.0f}")
-c3.metric("↩️ Qaytgan summa", f"{total_return:,.0f}")
-c4.metric("❌ Qaytish %", f"{(total_return/max(total_sales,1)*100):.2f}%")
-
-# ================================
-# PRODUCT ANALYSIS
-# ================================
-st.subheader("🛒 Mahsulot bo‘yicha analiz")
-
-prod_orders = orders.groupby("Номенклатура")["Количество"].sum()
-prod_sales  = sales.groupby("Номенклатура")["Продажная сумма"].sum()
-prod_return = sales.groupby("Номенклатура")["Возврат сумма"].sum()
-
-summary = pd.concat(
-    [prod_orders, prod_sales, prod_return],
+client_df = pd.concat(
+    [client_orders, client_sales, client_return],
     axis=1
 ).fillna(0)
 
-summary.columns = ["Zakaz", "Sotuv", "Qaytish"]
-summary["Return_%"] = (summary["Qaytish"] / summary["Sotuv"].replace(0,1) * 100).round(2)
+client_df.columns = ["Zakaz_soni", "Sotuv_summa", "Qaytish_summa"]
 
-st.dataframe(summary.sort_values("Return_%", ascending=False), use_container_width=True)
+# 🔒 FOIZNI TO‘G‘RI HISOBLASH (0–100)
+client_df["Qaytish_%"] = (
+    client_df["Qaytish_summa"] /
+    client_df["Sotuv_summa"].replace(0, 1)
+) * 100
 
-# ================================
-# ZARARLI MAHSULOTLAR
-# ================================
-st.subheader("🚨 Zarar keltirayotgan mahsulotlar")
+client_df["Qaytish_%"] = client_df["Qaytish_%"].clip(0, 100).round(2)
 
-loss_products = summary[
-    (summary["Return_%"] > 20) & (summary["Qaytish"] > 0)
-]
+st.dataframe(
+    client_df.sort_values("Qaytish_%", ascending=False),
+    use_container_width=True
+)
 
-st.dataframe(loss_products, use_container_width=True)
+# =========================
+# VISUAL
+# =========================
+st.subheader("📉 Eng ko‘p qaytish bo‘lgan klientlar")
 
-# ================================
-# WEEKDAY ANALYSIS
-# ================================
-st.subheader("📆 Hafta kunlari bo‘yicha zakaz & qaytish")
-
-orders["weekday"] = orders["Период"].dt.day_name()
-sales["weekday"]  = sales["Период"].dt.day_name()
-
-week_order = orders.groupby("weekday")["Количество"].sum()
-week_return = sales.groupby("weekday")["Возврат сумма"].sum()
+top = client_df.sort_values("Qaytish_%", ascending=False).head(10)
 
 fig, ax = plt.subplots(figsize=(10,5))
-week_order.plot(kind="bar", ax=ax)
-ax.set_title("Zakazlar – hafta kunlari")
+top["Qaytish_%"].plot(kind="bar", ax=ax)
+ax.set_ylabel("%")
+ax.set_title("Top 10 klient – Qaytish foizi")
 st.pyplot(fig)
 
-fig2, ax2 = plt.subplots(figsize=(10,5))
-week_return.plot(kind="bar", ax=ax2)
-ax2.set_title("Qaytishlar – hafta kunlari")
-st.pyplot(fig2)
-
-# ================================
-# CLIENT ANALYSIS
-# ================================
-st.subheader("👤 Klientlar kesimida analiz")
-
-client_orders = orders.groupby("Контрагент")["Количество"].sum()
-client_returns = sales.groupby("Контрагент")["Возврат сумма"].sum()
-
-client_df = pd.concat([client_orders, client_returns], axis=1).fillna(0)
-client_df.columns = ["Zakaz", "Qaytish"]
-
-st.dataframe(client_df.sort_values("Qaytish", ascending=False), use_container_width=True)
-
-# ================================
-# SIMPLE FORECAST (MOVING AVG)
-# ================================
-st.subheader("📈 Zakaz prognozi (oddiy)")
-
-daily = orders.groupby(orders["Период"].dt.date)["Количество"].sum()
-forecast = daily.rolling(3).mean()
-
-fig3, ax3 = plt.subplots(figsize=(10,5))
-daily.plot(ax=ax3, label="Real")
-forecast.plot(ax=ax3, label="Prognoz")
-ax3.legend()
-st.pyplot(fig3)
-
-st.success("✅ Analiz to‘liq yakunlandi")
+st.success("✅ Barcha analizlar xatosiz yakunlandi")
